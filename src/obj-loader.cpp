@@ -21,8 +21,11 @@ GLFWwindow* window;
 #include <glm/gtc/matrix_transform.hpp>
 using namespace glm;
 
-#define W_WIDTH 1280
-#define W_HEIGHT 800
+#define W_WIDTH 1024
+#define W_HEIGHT 768
+#define FOURCC_DXT1 0x31545844 // Equivalent to "DXT1" in ASCII
+#define FOURCC_DXT3 0x33545844 // Equivalent to "DXT3" in ASCII
+#define FOURCC_DXT5 0x35545844 // Equivalent to "DXT5" in ASCII
 
 mat4 ViewMatrix;
 mat4 ProjectionMatrix;
@@ -107,6 +110,96 @@ void computeMatricesFromInputs() {
 
     // For the next frame, the "last time" will be "now"
     lastTime = currentTime;
+}
+
+GLuint loadDDS(const char * imagepath){
+	unsigned char header[124];
+
+	FILE *fp; 
+ 
+	/* try to open the file */ 
+	fp = fopen(imagepath, "rb"); 
+	if (fp == NULL){
+		printf("%s could not be opened. Are you in the right directory ? Don't forget to read the FAQ !\n", imagepath); getchar(); 
+		return 0;
+	}
+   
+	/* verify the type of file */ 
+	char filecode[4]; 
+	fread(filecode, 1, 4, fp); 
+	if (strncmp(filecode, "DDS ", 4) != 0) { 
+		fclose(fp); 
+		return 0; 
+	}
+	
+	/* get the surface desc */ 
+	fread(&header, 124, 1, fp); 
+
+	unsigned int height      = *(unsigned int*)&(header[8 ]);
+	unsigned int width	     = *(unsigned int*)&(header[12]);
+	unsigned int linearSize	 = *(unsigned int*)&(header[16]);
+	unsigned int mipMapCount = *(unsigned int*)&(header[24]);
+	unsigned int fourCC      = *(unsigned int*)&(header[80]);
+
+ 
+	unsigned char * buffer;
+	unsigned int bufsize;
+	/* how big is it going to be including all mipmaps? */ 
+	bufsize = mipMapCount > 1 ? linearSize * 2 : linearSize; 
+	buffer = (unsigned char*)malloc(bufsize * sizeof(unsigned char)); 
+	fread(buffer, 1, bufsize, fp); 
+	/* close the file pointer */ 
+	fclose(fp);
+
+	unsigned int components  = (fourCC == FOURCC_DXT1) ? 3 : 4; 
+	unsigned int format;
+	switch(fourCC) 
+	{ 
+	case FOURCC_DXT1: 
+		format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT; 
+		break; 
+	case FOURCC_DXT3: 
+		format = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT; 
+		break; 
+	case FOURCC_DXT5: 
+		format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT; 
+		break; 
+	default: 
+		free(buffer); 
+		return 0; 
+	}
+
+	// Create one OpenGL texture
+	GLuint textureID;
+	glGenTextures(1, &textureID);
+
+	// "Bind" the newly created texture : all future texture functions will modify this texture
+	glBindTexture(GL_TEXTURE_2D, textureID);
+	glPixelStorei(GL_UNPACK_ALIGNMENT,1);	
+	
+	unsigned int blockSize = (format == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT) ? 8 : 16; 
+	unsigned int offset = 0;
+
+	/* load the mipmaps */ 
+	for (unsigned int level = 0; level < mipMapCount && (width || height); ++level) 
+	{ 
+		unsigned int size = ((width+3)/4)*((height+3)/4)*blockSize; 
+		glCompressedTexImage2D(GL_TEXTURE_2D, level, format, width, height,  
+			0, size, buffer + offset); 
+	 
+		offset += size; 
+		width  /= 2; 
+		height /= 2; 
+
+		// Deal with Non-Power-Of-Two textures. This code is not included in the webpage to reduce clutter.
+		if(width < 1) width = 1;
+		if(height < 1) height = 1;
+
+	} 
+
+	free(buffer); 
+
+	return textureID;
 }
 
 GLuint LoadShaders(const char* vertex_file_path,
@@ -332,17 +425,18 @@ int main(void) {
     glBindVertexArray(VertexArrayID);
 
     // Create and compile our GLSL program from the shaders
-    GLuint programID = LoadShaders("TransformVertexShader.vertexshader",
-                                   "TextureFragmentShader.fragmentshader");
+	GLuint programID = LoadShaders( "StandardShading.vertexshader", "StandardShading.fragmentshader" );
 
     // Get a handle for our "MVP" uniform
     GLuint MatrixID = glGetUniformLocation(programID, "MVP");
+	GLuint ViewMatrixID = glGetUniformLocation(programID, "V");
+	GLuint ModelMatrixID = glGetUniformLocation(programID, "M");
 
     // Load the texture
-    // GLuint Texture = loadDDS("uvmap.DDS");
+    GLuint Texture = loadDDS("uvmap.DDS");
 
     // Get a handle for our "myTextureSampler" uniform
-    // GLuint TextureID = glGetUniformLocation(programID, "myTextureSampler");
+    GLuint TextureID = glGetUniformLocation(programID, "myTextureSampler");
 
     // Read our .obj file
     vector<vec3> vertices;
@@ -370,6 +464,16 @@ int main(void) {
                      GL_STATIC_DRAW);
     }
 
+	GLuint normalbuffer;
+    if (res) {
+        glGenBuffers(1, &normalbuffer);
+        glBindBuffer(GL_ARRAY_BUFFER, normalbuffer);
+        glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(vec3), &normals[0], GL_STATIC_DRAW);
+    }
+
+	glUseProgram(programID);
+	GLuint LightID = glGetUniformLocation(programID, "LightPosition_worldspace");
+
     do {
         // Clear the screen
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -387,12 +491,17 @@ int main(void) {
         // Send our transformation to the currently bound shader,
         // in the "MVP" uniform
         glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &MVP[0][0]);
+		glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrix[0][0]);
+		glUniformMatrix4fv(ViewMatrixID, 1, GL_FALSE, &ViewMatrix[0][0]);
+
+		vec3 lightPos = vec3(4,4,4);
+		glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
 
         // Bind our texture in Texture Unit 0
-        // glActiveTexture(GL_TEXTURE0);
-        // glBindTexture(GL_TEXTURE_2D, Texture);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, Texture);
         // Set our "myTextureSampler" sampler to user Texture Unit 0
-        // glUniform1i(TextureID, 0);
+        glUniform1i(TextureID, 0);
 
         // 1rst attribute buffer : vertices
         glEnableVertexAttribArray(0);
@@ -417,12 +526,26 @@ int main(void) {
                                   (void*)0   // array buffer offset
                                   );
         }
-
+		// 3rd attribute buffer : normals
+        if (res) {
+            glEnableVertexAttribArray(2);
+            glBindBuffer(GL_ARRAY_BUFFER, normalbuffer);
+            glVertexAttribPointer(
+                2,                                // attribute
+                3,                                // size
+                GL_FLOAT,                         // type
+                GL_FALSE,                         // normalized?
+                0,                                // stride
+                (void*)0                          // array buffer offset
+            );
+        }
+        
         // Draw the triangle !
         glDrawArrays(GL_TRIANGLES, 0, vertices.size());
 
         glDisableVertexAttribArray(0);
         glDisableVertexAttribArray(1);
+        glDisableVertexAttribArray(2);
 
         // Swap buffers
         glfwSwapBuffers(window);
@@ -434,9 +557,12 @@ int main(void) {
 
     // Cleanup VBO and shader
     glDeleteBuffers(1, &vertexbuffer);
-    glDeleteBuffers(1, &uvbuffer);
+    if (res) {
+        glDeleteBuffers(1, &uvbuffer);
+        glDeleteBuffers(1, &normalbuffer);
+    }
     glDeleteProgram(programID);
-    // glDeleteTextures(1, &TextureID);
+    glDeleteTextures(1, &TextureID);
     glDeleteVertexArrays(1, &VertexArrayID);
 
     // Close OpenGL window and terminate GLFW
