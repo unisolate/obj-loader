@@ -1,4 +1,3 @@
-// Include standard headers
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -9,293 +8,248 @@
 #include <vector>
 using namespace std;
 
-// Include GLEW
 #include <GL/glew.h>
 
-// Include GLFW
 #include <glfw3.h>
 GLFWwindow* window;
 
-// Include GLM
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 using namespace glm;
 
 #define W_WIDTH 1024
 #define W_HEIGHT 768
-#define FOURCC_DXT1 0x31545844 // Equivalent to "DXT1" in ASCII
-#define FOURCC_DXT3 0x33545844 // Equivalent to "DXT3" in ASCII
-#define FOURCC_DXT5 0x35545844 // Equivalent to "DXT5" in ASCII
 
-mat4 ViewMatrix;
-mat4 ProjectionMatrix;
+mat4 v_mat;
+mat4 p_mat;
 
-mat4 getViewMatrix() { return ViewMatrix; }
-mat4 getProjectionMatrix() { return ProjectionMatrix; }
+mat4 getViewMatrix() { return v_mat; }
+mat4 getProjectionMatrix() { return p_mat; }
 
-// Initial position : on +Z
-vec3 position = vec3(0, 0, 5);
-// Initial horizontal angle : toward -Z
-float horizontalAngle = 3.14f;
-// Initial vertical angle : none
-float verticalAngle = 0.0f;
-// Initial Field of View
-float initialFoV = 45.0f;
+vec3 position = vec3(0, 0, 5);  // +Z
+float h_angle = 3.14f;          // -Z
+float v_angle = 0.0f;
+float init_fov = 45.0f;
 
-float speed = 3.0f;  // 3 units / second
-float mouseSpeed = 0.005f;
+float speed = 10.0f;
+float mouse_speed = 0.005f;
 
 void computeMatricesFromInputs() {
-    // glfwGetTime is called only once, the first time this function is called
-    static double lastTime = glfwGetTime();
+    static double last_t = glfwGetTime();  // called only once
+    double curr_t = glfwGetTime();
+    float delta_t = float(curr_t - last_t);
 
-    // Compute time difference between current and last frame
-    double currentTime = glfwGetTime();
-    float deltaTime = float(currentTime - lastTime);
+    // double xpos, ypos;
+    // glfwGetCursorPos(window, &xpos, &ypos);               // get mouse pos
+    // glfwSetCursorPos(window, W_WIDTH / 2, W_HEIGHT / 2);  // reset pos
 
-    // Get mouse position
-    double xpos, ypos;
-    glfwGetCursorPos(window, &xpos, &ypos);
+    // get new orientation
+    // h_angle += mouse_speed * float(W_WIDTH / 2 - xpos);
+    // v_angle += mouse_speed * float(W_HEIGHT / 2 - ypos);
 
-    // Reset mouse position for next frame
-    glfwSetCursorPos(window, W_WIDTH / 2, W_HEIGHT / 2);
+    // convert spherical coordinates to cartesian coordinates
+    vec3 direction(cos(v_angle) * sin(h_angle), sin(v_angle),
+                   cos(v_angle) * cos(h_angle));
 
-    // Compute new orientation
-    horizontalAngle += mouseSpeed * float(W_WIDTH / 2 - xpos);
-    verticalAngle += mouseSpeed * float(W_HEIGHT / 2 - ypos);
-
-    // Direction : Spherical coordinates to Cartesian coordinates conversion
-    vec3 direction(cos(verticalAngle) * sin(horizontalAngle),
-                   sin(verticalAngle),
-                   cos(verticalAngle) * cos(horizontalAngle));
-
-    // Right vector
-    vec3 right = vec3(sin(horizontalAngle - 3.14f / 2.0f), 0,
-                      cos(horizontalAngle - 3.14f / 2.0f));
-
-    // Up vector
+    // vec3 right =
+    //     vec3(sin(h_angle - 3.14f / 2.0f), 0, cos(h_angle - 3.14f / 2.0f));
+    vec3 right =
+        vec3(sin(h_angle - 3.14f / 2.0f), 0, cos(h_angle - 3.14f / 2.0f));
     vec3 up = cross(right, direction);
 
-    // Move forward
+    // move forward
     if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
-        position += direction * deltaTime * speed;
+        position += direction * delta_t * speed;
     }
-    // Move backward
+    // move backward
     if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
-        position -= direction * deltaTime * speed;
+        position -= direction * delta_t * speed;
     }
-    // Strafe right
+    // rotate right
     if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-        position += right * deltaTime * speed;
+        position += right * delta_t * speed;
     }
-    // Strafe left
+    // rotate left
     if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-        position -= right * deltaTime * speed;
+        position -= right * delta_t * speed;
     }
 
-    float FoV = initialFoV;  // - 5 * glfwGetMouseWheel(); // Now GLFW 3
-                             // requires setting up a callback for this. It's a
-                             // bit too complicated for this beginner's
-                             // tutorial, so it's disabled instead.
+    // TODO: change fov using mouse wheel
+    float fov = init_fov;  // - 5 * glfwGetMouseWheel();
 
-    // Projection matrix : 45° Field of View, 4:3 ratio, display range : 0.1
-    // unit <-> 100 units
-    ProjectionMatrix = perspective(FoV, 4.0f / 3.0f, 0.1f, 100.0f);
-    // Camera matrix
-    ViewMatrix = lookAt(position,              // Camera is here
-                        position + direction,  // and looks here : at the same
-                                               // position, plus "direction"
-                        up  // Head is up (set to 0,-1,0 to look upside-down)
-                        );
+    // projection matrix: 45° field of view, 4:3 ratio
+    // display range: 0.1 unit <-> 100 units
+    p_mat = perspective(fov, 4.0f / 3.0f, 0.1f, 100.0f);
+    // camera matrix
+    v_mat = lookAt(position,              // camera pos
+                   position + direction,  // look-at direction
+                   up                     // down: (0, -1, 0)
+                   );
 
-    // For the next frame, the "last time" will be "now"
-    lastTime = currentTime;
+    last_t = curr_t;
 }
 
-GLuint loadDDS(const char * imagepath){
-	unsigned char header[124];
+#define FOURCC_DXT1 0x31545844  // ASCII of "DXT1"
+#define FOURCC_DXT3 0x33545844
+#define FOURCC_DXT5 0x35545844
 
-	FILE *fp; 
- 
-	/* try to open the file */ 
-	fp = fopen(imagepath, "rb"); 
-	if (fp == NULL){
-		printf("%s could not be opened. Are you in the right directory ? Don't forget to read the FAQ !\n", imagepath); getchar(); 
-		return 0;
-	}
-   
-	/* verify the type of file */ 
-	char filecode[4]; 
-	fread(filecode, 1, 4, fp); 
-	if (strncmp(filecode, "DDS ", 4) != 0) { 
-		fclose(fp); 
-		return 0; 
-	}
-	
-	/* get the surface desc */ 
-	fread(&header, 124, 1, fp); 
+GLuint loadDDS(const char* imagepath) {
+    unsigned char header[124];
 
-	unsigned int height      = *(unsigned int*)&(header[8 ]);
-	unsigned int width	     = *(unsigned int*)&(header[12]);
-	unsigned int linearSize	 = *(unsigned int*)&(header[16]);
-	unsigned int mipMapCount = *(unsigned int*)&(header[24]);
-	unsigned int fourCC      = *(unsigned int*)&(header[80]);
+    FILE* fp;
+    fp = fopen(imagepath, "rb");
+    if (fp == NULL) {
+        fprintf(stderr, "Failed to open image.\n");
+        return 0;
+    }
 
- 
-	unsigned char * buffer;
-	unsigned int bufsize;
-	/* how big is it going to be including all mipmaps? */ 
-	bufsize = mipMapCount > 1 ? linearSize * 2 : linearSize; 
-	buffer = (unsigned char*)malloc(bufsize * sizeof(unsigned char)); 
-	fread(buffer, 1, bufsize, fp); 
-	/* close the file pointer */ 
-	fclose(fp);
+    // check file type
+    char filecode[4];
+    fread(filecode, 1, 4, fp);
+    if (strncmp(filecode, "DDS ", 4) != 0) {
+        fclose(fp);
+        return 0;
+    }
 
-	unsigned int components  = (fourCC == FOURCC_DXT1) ? 3 : 4; 
-	unsigned int format;
-	switch(fourCC) 
-	{ 
-	case FOURCC_DXT1: 
-		format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT; 
-		break; 
-	case FOURCC_DXT3: 
-		format = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT; 
-		break; 
-	case FOURCC_DXT5: 
-		format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT; 
-		break; 
-	default: 
-		free(buffer); 
-		return 0; 
-	}
+    fread(&header, 124, 1, fp);  // get surface desc
 
-	// Create one OpenGL texture
-	GLuint textureID;
-	glGenTextures(1, &textureID);
+    unsigned int height = *(unsigned int*)&(header[8]);
+    unsigned int width = *(unsigned int*)&(header[12]);
+    unsigned int linear_size = *(unsigned int*)&(header[16]);
+    unsigned int mip_map_cnt = *(unsigned int*)&(header[24]);
+    unsigned int four_cc = *(unsigned int*)&(header[80]);
 
-	// "Bind" the newly created texture : all future texture functions will modify this texture
-	glBindTexture(GL_TEXTURE_2D, textureID);
-	glPixelStorei(GL_UNPACK_ALIGNMENT,1);	
-	
-	unsigned int blockSize = (format == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT) ? 8 : 16; 
-	unsigned int offset = 0;
+    unsigned char* buffer;
+    unsigned int bufsize;
+    bufsize = mip_map_cnt > 1 ? linear_size * 2 : linear_size;
+    buffer = (unsigned char*)malloc(bufsize * sizeof(unsigned char));
+    fread(buffer, 1, bufsize, fp);
+    fclose(fp);
 
-	/* load the mipmaps */ 
-	for (unsigned int level = 0; level < mipMapCount && (width || height); ++level) 
-	{ 
-		unsigned int size = ((width+3)/4)*((height+3)/4)*blockSize; 
-		glCompressedTexImage2D(GL_TEXTURE_2D, level, format, width, height,  
-			0, size, buffer + offset); 
-	 
-		offset += size; 
-		width  /= 2; 
-		height /= 2; 
+    // unsigned int components = (four_cc == FOURCC_DXT1) ? 3 : 4;
+    unsigned int format;
+    switch (four_cc) {
+        case FOURCC_DXT1:
+            format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+            break;
+        case FOURCC_DXT3:
+            format = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
+            break;
+        case FOURCC_DXT5:
+            format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+            break;
+        default:
+            free(buffer);
+            return 0;
+    }
 
-		// Deal with Non-Power-Of-Two textures. This code is not included in the webpage to reduce clutter.
-		if(width < 1) width = 1;
-		if(height < 1) height = 1;
+    GLuint texture_id;
+    glGenTextures(1, &texture_id);
 
-	} 
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-	free(buffer); 
+    unsigned int blockSize =
+        (format == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT) ? 8 : 16;
+    unsigned int offset = 0;
 
-	return textureID;
+    // load mipmaps
+    for (unsigned int level = 0; level < mip_map_cnt && (width || height);
+         ++level) {
+        unsigned int size = ((width + 3) / 4) * ((height + 3) / 4) * blockSize;
+        glCompressedTexImage2D(GL_TEXTURE_2D, level, format, width, height, 0,
+                               size, buffer + offset);
+
+        offset += size;
+        width /= 2;
+        height /= 2;
+
+        if (width < 1) width = 1;
+        if (height < 1) height = 1;
+    }
+    free(buffer);
+    return texture_id;
 }
 
 GLuint LoadShaders(const char* vertex_file_path,
                    const char* fragment_file_path) {
-    // Create the shaders
-    GLuint VertexShaderID = glCreateShader(GL_VERTEX_SHADER);
-    GLuint FragmentShaderID = glCreateShader(GL_FRAGMENT_SHADER);
+    GLuint v_shader_id = glCreateShader(GL_VERTEX_SHADER);
+    GLuint f_shader_id = glCreateShader(GL_FRAGMENT_SHADER);
 
-    // Read the Vertex Shader code from the file
-    string VertexShaderCode;
-    ifstream VertexShaderStream(vertex_file_path, ios::in);
-    if (VertexShaderStream.is_open()) {
-        string Line = "";
-        while (getline(VertexShaderStream, Line))
-            VertexShaderCode += "\n" + Line;
-        VertexShaderStream.close();
+    string v_shader_code;
+    ifstream v_shader_stream(vertex_file_path, ios::in);
+    if (v_shader_stream.is_open()) {
+        string line = "";
+        while (getline(v_shader_stream, line)) {
+            v_shader_code += "\n" + line;
+        }
+        v_shader_stream.close();
     } else {
         fprintf(stderr, "Failed to open shader.\n");
         return 0;
     }
 
-    // Read the Fragment Shader code from the file
-    string FragmentShaderCode;
-    ifstream FragmentShaderStream(fragment_file_path, ios::in);
-    if (FragmentShaderStream.is_open()) {
-        string Line = "";
-        while (getline(FragmentShaderStream, Line))
-            FragmentShaderCode += "\n" + Line;
-        FragmentShaderStream.close();
+    string f_shader_code;
+    ifstream f_shader_stream(fragment_file_path, ios::in);
+    if (f_shader_stream.is_open()) {
+        string line = "";
+        while (getline(f_shader_stream, line)) f_shader_code += "\n" + line;
+        f_shader_stream.close();
     }
 
-    GLint Result = GL_FALSE;
-    int InfoLogLength;
+    GLint result = GL_FALSE;
+    int info_log_len;
 
-    // Compile Vertex Shader
-    // printf("Compiling shader : %s\n", vertex_file_path);
-    char const* VertexSourcePointer = VertexShaderCode.c_str();
-    glShaderSource(VertexShaderID, 1, &VertexSourcePointer, NULL);
-    glCompileShader(VertexShaderID);
+    char const* v_source_ptr = v_shader_code.c_str();
+    glShaderSource(v_shader_id, 1, &v_source_ptr, NULL);
+    glCompileShader(v_shader_id);
 
-    // Check Vertex Shader
-    glGetShaderiv(VertexShaderID, GL_COMPILE_STATUS, &Result);
-    glGetShaderiv(VertexShaderID, GL_INFO_LOG_LENGTH, &InfoLogLength);
-    if (InfoLogLength > 0) {
-        vector<char> VertexShaderErrorMessage(InfoLogLength + 1);
-        glGetShaderInfoLog(VertexShaderID, InfoLogLength, NULL,
-                           &VertexShaderErrorMessage[0]);
-        fprintf(stderr, "%s\n", &VertexShaderErrorMessage[0]);
+    glGetShaderiv(v_shader_id, GL_COMPILE_STATUS, &result);
+    glGetShaderiv(v_shader_id, GL_INFO_LOG_LENGTH, &info_log_len);
+    if (info_log_len > 0) {
+        vector<char> v_shader_errmsg(info_log_len + 1);
+        glGetShaderInfoLog(v_shader_id, info_log_len, NULL,
+                           &v_shader_errmsg[0]);
+        fprintf(stderr, "%s\n", &v_shader_errmsg[0]);
     }
 
-    // Compile Fragment Shader
-    // printf("Compiling shader : %s\n", fragment_file_path);
-    char const* FragmentSourcePointer = FragmentShaderCode.c_str();
-    glShaderSource(FragmentShaderID, 1, &FragmentSourcePointer, NULL);
-    glCompileShader(FragmentShaderID);
+    char const* f_source_ptr = f_shader_code.c_str();
+    glShaderSource(f_shader_id, 1, &f_source_ptr, NULL);
+    glCompileShader(f_shader_id);
 
-    // Check Fragment Shader
-    glGetShaderiv(FragmentShaderID, GL_COMPILE_STATUS, &Result);
-    glGetShaderiv(FragmentShaderID, GL_INFO_LOG_LENGTH, &InfoLogLength);
-    if (InfoLogLength > 0) {
-        vector<char> FragmentShaderErrorMessage(InfoLogLength + 1);
-        glGetShaderInfoLog(FragmentShaderID, InfoLogLength, NULL,
-                           &FragmentShaderErrorMessage[0]);
-        fprintf(stderr, "%s\n", &FragmentShaderErrorMessage[0]);
+    glGetShaderiv(f_shader_id, GL_COMPILE_STATUS, &result);
+    glGetShaderiv(f_shader_id, GL_INFO_LOG_LENGTH, &info_log_len);
+    if (info_log_len > 0) {
+        vector<char> f_shader_errmsg(info_log_len + 1);
+        glGetShaderInfoLog(f_shader_id, info_log_len, NULL,
+                           &f_shader_errmsg[0]);
+        fprintf(stderr, "%s\n", &f_shader_errmsg[0]);
     }
 
-    // Link the program
-    // printf("Linking program\n");
-    GLuint ProgramID = glCreateProgram();
-    glAttachShader(ProgramID, VertexShaderID);
-    glAttachShader(ProgramID, FragmentShaderID);
-    glLinkProgram(ProgramID);
+    GLuint prog_id = glCreateProgram();
+    glAttachShader(prog_id, v_shader_id);
+    glAttachShader(prog_id, f_shader_id);
+    glLinkProgram(prog_id);
 
-    // Check the program
-    glGetProgramiv(ProgramID, GL_LINK_STATUS, &Result);
-    glGetProgramiv(ProgramID, GL_INFO_LOG_LENGTH, &InfoLogLength);
-    if (InfoLogLength > 0) {
-        vector<char> ProgramErrorMessage(InfoLogLength + 1);
-        glGetProgramInfoLog(ProgramID, InfoLogLength, NULL,
-                            &ProgramErrorMessage[0]);
-        fprintf(stderr, "%s\n", &ProgramErrorMessage[0]);
+    glGetProgramiv(prog_id, GL_LINK_STATUS, &result);
+    glGetProgramiv(prog_id, GL_INFO_LOG_LENGTH, &info_log_len);
+    if (info_log_len > 0) {
+        vector<char> prog_errmsg(info_log_len + 1);
+        glGetProgramInfoLog(prog_id, info_log_len, NULL, &prog_errmsg[0]);
+        fprintf(stderr, "%s\n", &prog_errmsg[0]);
     }
 
-    glDetachShader(ProgramID, VertexShaderID);
-    glDetachShader(ProgramID, FragmentShaderID);
+    glDetachShader(prog_id, v_shader_id);
+    glDetachShader(prog_id, f_shader_id);
 
-    glDeleteShader(VertexShaderID);
-    glDeleteShader(FragmentShaderID);
+    glDeleteShader(v_shader_id);
+    glDeleteShader(f_shader_id);
 
-    return ProgramID;
+    return prog_id;
 }
 
 int loadOBJ(const char* path, vector<vec3>& out_vertices, vector<vec2>& out_uvs,
             vector<vec3>& out_normals) {
-    // printf("Loading OBJ file %s...\n", path);
-
     vector<unsigned int> vertex_idx, uv_idx, normal_idx;
     vector<vec3> temp_vertices;
     vector<vec2> temp_uvs;
@@ -315,9 +269,7 @@ int loadOBJ(const char* path, vector<vec3>& out_vertices, vector<vec2>& out_uvs,
         } else if (strcmp(line, "vt") == 0) {
             vec2 uv;
             fscanf(file, "%f %f\n", &uv.x, &uv.y);
-            uv.y = -uv.y;  // Invert V coordinate since we will only use DDS
-                           // texture, which are inverted. Remove if you want to
-                           // use TGA or BMP loaders.
+            uv.y = -uv.y;  // invert v coordinate for DDS texture
             temp_uvs.push_back(uv);
         } else if (strcmp(line, "vn") == 0) {
             vec3 normal;
@@ -326,6 +278,7 @@ int loadOBJ(const char* path, vector<vec3>& out_vertices, vector<vec2>& out_uvs,
         } else if (strcmp(line, "f") == 0) {
             int sz = (temp_uvs.size() ? 1 : 0) + (temp_normals.size() ? 1 : 0);
             unsigned int vertex_i, uv_i, normal_i;
+
             for (int i = 0; i < 3; ++i) {
                 if (sz) {
                     fscanf(file, "%d/%d/%d", &vertex_i, &uv_i, &normal_i);
@@ -337,22 +290,15 @@ int loadOBJ(const char* path, vector<vec3>& out_vertices, vector<vec2>& out_uvs,
                 vertex_idx.push_back(vertex_i);
             }
         } else {
-            // Probably a comment, eat up the rest of the line
-            char stupidBuffer[1000];
-            fgets(stupidBuffer, 1000, file);
+            char tmpbuffer[1000];
+            fgets(tmpbuffer, 1000, file);
         }
     }
 
     int sz = (temp_uvs.size() ? 1 : 0) + (temp_normals.size() ? 1 : 0);
-    // For each vertex of each triangle
     for (unsigned int i = 0; i < vertex_idx.size(); i++) {
-        // Get the indices of its attributes
         unsigned int vertex_i = vertex_idx[i];
-
-        // Get the attributes thanks to the index
         vec3 vertex = temp_vertices[vertex_i - 1];
-
-        // Put the attributes in buffers
         out_vertices.push_back(vertex);
 
         if (sz) {
@@ -371,7 +317,6 @@ int loadOBJ(const char* path, vector<vec3>& out_vertices, vector<vec2>& out_uvs,
 }
 
 int main(void) {
-    // Initialise GLFW
     if (!glfwInit()) {
         fprintf(stderr, "Failed to initialize GLFW.\n");
         return -1;
@@ -380,10 +325,10 @@ int main(void) {
     glfwWindowHint(GLFW_SAMPLES, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);  // OS X
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);  // OS X required
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    // Open a window and create its OpenGL context
+    // open window
     window = glfwCreateWindow(W_WIDTH, W_HEIGHT, "OBJ Loader", NULL, NULL);
     if (window == NULL) {
         fprintf(stderr, "Failed to open GLFW window.\n");
@@ -392,63 +337,48 @@ int main(void) {
     }
     glfwMakeContextCurrent(window);
 
-    // Initialize GLEW
-    glewExperimental = true;  // Needed for core profile
+    glewExperimental = true;
     if (glewInit() != GLEW_OK) {
         fprintf(stderr, "Failed to initialize GLEW.\n");
         glfwTerminate();
         return -1;
     }
 
-    // Ensure we can capture the escape key being pressed below
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GL_TRUE);
-    // Hide the mouse and enable unlimited mouvement
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    // glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    // glfwPollEvents();
+    // glfwSetCursorPos(window, W_WIDTH / 2, W_HEIGHT / 2);
 
-    // Set the mouse at the center of the screen
-    glfwPollEvents();
-    glfwSetCursorPos(window, W_WIDTH / 2, W_HEIGHT / 2);
+    // black background
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
-    // White background
-    glClearColor(1.0f, 1.0f, 1.0f, 0.0f);
-
-    // Enable depth test
     glEnable(GL_DEPTH_TEST);
-    // Accept fragment if it closer to the camera than the former one
     glDepthFunc(GL_LESS);
-
-    // Cull triangles which normal is not towards the camera
     glEnable(GL_CULL_FACE);
 
-    GLuint VertexArrayID;
-    glGenVertexArrays(1, &VertexArrayID);
-    glBindVertexArray(VertexArrayID);
+    GLuint v_array_id;
+    glGenVertexArrays(1, &v_array_id);
+    glBindVertexArray(v_array_id);
 
-    // Create and compile our GLSL program from the shaders
-	GLuint programID = LoadShaders( "StandardShading.vertexshader", "StandardShading.fragmentshader" );
+    GLuint prog_id = LoadShaders("StandardShading.vertexshader",
+                                 "StandardShading.fragmentshader");
 
-    // Get a handle for our "MVP" uniform
-    GLuint MatrixID = glGetUniformLocation(programID, "MVP");
-	GLuint ViewMatrixID = glGetUniformLocation(programID, "V");
-	GLuint ModelMatrixID = glGetUniformLocation(programID, "M");
+    GLuint mat_id = glGetUniformLocation(prog_id, "MVP");
+    GLuint v_mat_id = glGetUniformLocation(prog_id, "V");
+    GLuint m_mat_id = glGetUniformLocation(prog_id, "M");
 
-    // Load the texture
-    GLuint Texture = loadDDS("uvmap.DDS");
+    GLuint texture = loadDDS("uvmap.DDS");
+    GLuint texture_id = glGetUniformLocation(prog_id, "myTextureSampler");
 
-    // Get a handle for our "myTextureSampler" uniform
-    GLuint TextureID = glGetUniformLocation(programID, "myTextureSampler");
-
-    // Read our .obj file
+    // read obj file
     vector<vec3> vertices;
     vector<vec2> uvs;
-    vector<vec3> normals;  // Won't be used at the moment.
+    vector<vec3> normals;
     int res = loadOBJ("suzanne.obj", vertices, uvs, normals);
     if (res < 0) {
         fprintf(stderr, "Failed to parse obj file.\n");
         return -1;
     }
-
-    // Load it into a VBO
 
     GLuint vertexbuffer;
     glGenBuffers(1, &vertexbuffer);
@@ -464,46 +394,39 @@ int main(void) {
                      GL_STATIC_DRAW);
     }
 
-	GLuint normalbuffer;
+    GLuint normalbuffer;
     if (res) {
         glGenBuffers(1, &normalbuffer);
         glBindBuffer(GL_ARRAY_BUFFER, normalbuffer);
-        glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(vec3), &normals[0], GL_STATIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(vec3),
+                     &normals[0], GL_STATIC_DRAW);
     }
 
-	glUseProgram(programID);
-	GLuint LightID = glGetUniformLocation(programID, "LightPosition_worldspace");
+    glUseProgram(prog_id);
+    GLuint light_id = glGetUniformLocation(prog_id, "LightPosition_worldspace");
 
     do {
-        // Clear the screen
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Use our shader
-        glUseProgram(programID);
+        glUseProgram(prog_id);
 
-        // Compute the MVP matrix from keyboard and mouse input
         computeMatricesFromInputs();
-        mat4 ProjectionMatrix = getProjectionMatrix();
-        mat4 ViewMatrix = getViewMatrix();
-        mat4 ModelMatrix = mat4(1.0);
-        mat4 MVP = ProjectionMatrix * ViewMatrix * ModelMatrix;
+        mat4 p_mat = getProjectionMatrix();
+        mat4 v_mat = getViewMatrix();
+        mat4 m_mat = mat4(1.0);
+        mat4 MVP = p_mat * v_mat * m_mat;
 
-        // Send our transformation to the currently bound shader,
-        // in the "MVP" uniform
-        glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &MVP[0][0]);
-		glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrix[0][0]);
-		glUniformMatrix4fv(ViewMatrixID, 1, GL_FALSE, &ViewMatrix[0][0]);
+        glUniformMatrix4fv(mat_id, 1, GL_FALSE, &MVP[0][0]);
+        glUniformMatrix4fv(m_mat_id, 1, GL_FALSE, &m_mat[0][0]);
+        glUniformMatrix4fv(v_mat_id, 1, GL_FALSE, &v_mat[0][0]);
 
-		vec3 lightPos = vec3(4,4,4);
-		glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
+        vec3 lightPos = vec3(4, 4, 4);
+        glUniform3f(light_id, lightPos.x, lightPos.y, lightPos.z);
 
-        // Bind our texture in Texture Unit 0
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, Texture);
-        // Set our "myTextureSampler" sampler to user Texture Unit 0
-        glUniform1i(TextureID, 0);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glUniform1i(texture_id, 0);
 
-        // 1rst attribute buffer : vertices
         glEnableVertexAttribArray(0);
         glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
         glVertexAttribPointer(0,         // attribute
@@ -514,7 +437,6 @@ int main(void) {
                               (void*)0   // array buffer offset
                               );
 
-        // 2nd attribute buffer : UVs
         if (res) {
             glEnableVertexAttribArray(1);
             glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
@@ -525,47 +447,39 @@ int main(void) {
                                   0,         // stride
                                   (void*)0   // array buffer offset
                                   );
-        }
-		// 3rd attribute buffer : normals
-        if (res) {
+
             glEnableVertexAttribArray(2);
             glBindBuffer(GL_ARRAY_BUFFER, normalbuffer);
-            glVertexAttribPointer(
-                2,                                // attribute
-                3,                                // size
-                GL_FLOAT,                         // type
-                GL_FALSE,                         // normalized?
-                0,                                // stride
-                (void*)0                          // array buffer offset
-            );
+            glVertexAttribPointer(2,         // attribute
+                                  3,         // size
+                                  GL_FLOAT,  // type
+                                  GL_FALSE,  // normalized?
+                                  0,         // stride
+                                  (void*)0   // array buffer offset
+                                  );
         }
-        
-        // Draw the triangle !
+
         glDrawArrays(GL_TRIANGLES, 0, vertices.size());
 
         glDisableVertexAttribArray(0);
         glDisableVertexAttribArray(1);
         glDisableVertexAttribArray(2);
 
-        // Swap buffers
         glfwSwapBuffers(window);
         glfwPollEvents();
 
-    }  // Check if the ESC key was pressed or the window was closed
-    while (glfwGetKey(window, GLFW_KEY_ESCAPE) != GLFW_PRESS &&
-           glfwWindowShouldClose(window) == 0);
+    } while (glfwGetKey(window, GLFW_KEY_ESCAPE) != GLFW_PRESS &&
+             glfwWindowShouldClose(window) == 0);
 
-    // Cleanup VBO and shader
     glDeleteBuffers(1, &vertexbuffer);
     if (res) {
         glDeleteBuffers(1, &uvbuffer);
         glDeleteBuffers(1, &normalbuffer);
     }
-    glDeleteProgram(programID);
-    glDeleteTextures(1, &TextureID);
-    glDeleteVertexArrays(1, &VertexArrayID);
+    glDeleteProgram(prog_id);
+    glDeleteTextures(1, &texture_id);
+    glDeleteVertexArrays(1, &v_array_id);
 
-    // Close OpenGL window and terminate GLFW
     glfwTerminate();
 
     return 0;
